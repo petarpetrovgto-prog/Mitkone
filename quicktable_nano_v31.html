@@ -1,0 +1,160 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QuickTable Nano v31</title>
+<style>
+  body{margin:0;font:16px/1.35 -apple-system,system-ui,Segoe UI,Roboto,Arial;background:#0e1116;color:#e8eef7}
+  .bar{position:sticky;top:0;background:#121826;border-bottom:1px solid #2a3446;padding:10px 12px;z-index:9}
+  .row{display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap}
+  input{background:#0f1520;color:#e8eef7;border:1px solid #2a3446;border-radius:10px;padding:12px 14px;font-size:18px;outline:none}
+  input:focus{outline:2px solid #4da3ff;outline-offset:2px}
+  .hand{min-width:220px} .stack{width:110px}
+  .chip{border:1px solid #2a3446;background:#0f1520;border-radius:999px;padding:4px 8px;font-size:12px}
+  .grid{display:grid;gap:10px;padding:10px}
+  @media (min-width:900px){ .grid{grid-template-columns:repeat(4,1fr)} }
+  @media (max-width:899px){ .grid{grid-template-columns:repeat(2,1fr)} }
+  .col{border:1px solid #2a3446;background:#0f1624;border-radius:12px;padding:8px}
+  .col h2{margin:6px 0 8px;font-size:16px;text-align:center;color:#d6e5ff}
+  .card{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid #2a3446;background:#0f1520;border-radius:10px;padding:8px 10px;min-height:42px}
+  .label{font-weight:800}
+  .val{font-weight:900;padding:6px 10px;border-radius:8px;min-width:110px;text-align:center}
+</style>
+<div class="bar">
+  <div class="row">
+    <input id="hand" class="hand" placeholder="Ръка (AJo, 22, KTs)" autocapitalize="characters" spellcheck="false">
+    <input id="stack" class="stack" type="number" min="0" max="200" step="1" placeholder="bb" inputmode="numeric">
+    <span id="rng" class="chip">0–4</span>
+  </div>
+</div>
+<div class="grid">
+  <div class="col"><h2>HUSB & BU</h2><div id="C1"></div></div>
+  <div class="col"><h2>HUBB</h2><div id="C2"></div></div>
+  <div class="col"><h2>SB</h2><div id="C3"></div></div>
+  <div class="col"><h2>BB</h2><div id="C4"></div></div>
+</div>
+<script>
+(function(){
+  const COLORS={
+    "FOLD":"#f4f6fa","L-F-F":"#a7e8a7","L-C-F":"#155d15","L-C-AI":"#bcdcf3","L-R-AI":"#0b3a94",
+    "MR-F-F":"#ffe27a","MR-C-AI":"#7b4a2a","MR-4B-AI":"#e44747","SHOVE":"#6d4b8e"
+  };
+  const norm=s=>(s||"").toUpperCase().replace(/\\s+/g,"");
+  const rgb=h=>{h=h.replace("#","");let n=parseInt(h,16);return{r:(n>>16)&255,g:(n>>8)&255,b:n&255}};
+  const txtColor=h=>{let {r,g,b}=rgb(h);return ((r*299+g*587+b*114)/1000)>160?"#000":"#fff"};
+  const parseStack=bb=>{bb=+bb;if(!isFinite(bb))return"0–4";if(bb<4)return"0–4";if(bb<7)return"4–7";if(bb<10)return"7–10";if(bb<13)return"10–13";return"13+"};
+  const isPushPos=pos=>/PUSH/i.test(pos);
+  const alias=(key,act)=>{
+    const up=(act||"").toUpperCase();
+    if(!(key==="BBvsSB_L"||key==="HUBB_L"))return{d:act,c:null};
+    if(up==="MR-F-F")return{d:"Check/Call",c:COLORS["MR-F-F"]};
+    if(up==="L-C-AI")return{d:"ISO/Call",c:COLORS["L-C-AI"]};
+    if(up==="SHOVE")return{d:"ISO/3bet AI",c:COLORS["SHOVE"]};
+    if(up==="MR-4B-AI")return{d:"ISO/3bet/Fold",c:COLORS["MR-4B-AI"]};
+    return{d:act,c:null};
+  };
+
+  let DB=JSON.parse(localStorage.getItem("qt_v31")||"{}");
+  const key=(p,r)=>p+"||"+r;
+  const get=(p,r)=>DB[key(p,r)]?.raw||"";
+  const set=(p,r,raw)=>{DB[key(p,r)]={raw};localStorage.setItem("qt_v31",JSON.stringify(DB))};
+
+  function parse(raw,push){
+    if(!raw)return{def:null,map:{}}; let def=null,map={};
+    raw.split(/\\r?\\n|;/).map(s=>s.trim()).filter(Boolean).forEach(line=>{
+      const m=line.split("=");
+      if(m.length===1){ const v=m[0].trim(); if(!v)return; def=push?num(v):v.toUpperCase(); }
+      else{ const h=norm(m[0]); const v=m.slice(1).join("=").trim();
+        if(/^DEFAULT$/i.test(h)) def=push?num(v):v.toUpperCase();
+        else if(h) map[h]=push?num(v):v.toUpperCase();
+      }
+    });
+    return{def,map};
+  }
+  const num=x=>{const n=parseFloat(String(x).replace(",","."));return isFinite(n)?n:null};
+
+  const GROUPS={
+    C1:[{l:"HUSB",k:"HUSB",n:true},{l:"BU",k:"BU",n:true}],
+    C2:[{l:"HUBB (Limp)",k:"HUBB_L"},{l:"HUBB (MR)",k:"HUBB_MR"},{l:"HUBB (Push)",k:"HUBBv_PUSH"}],
+    C3:[{l:"SBvsBU (MR)",k:"SBvsBU"},{l:"SBvsBU (Push)",k:"SBvsBU_PUSH"},{l:"SBvsBB",k:"SBvsBB_PUSH",n:true}],
+    C4:[{l:"BBvsBU (MR)",k:"BBvsBU_MR"},{l:"BBvsBU (Push)",k:"BBvsBU_PUSH"},{l:"BBvsSB (Limp)",k:"BBvsSB_L"},{l:"BBvsSB (MR)",k:"BBvsSB_MR"},{l:"BBvsSB (Push)",k:"BBvsSB_PUSH"}]
+  };
+
+  const hand=document.getElementById("hand");
+  const stack=document.getElementById("stack");
+  const rngChip=document.getElementById("rng");
+
+  function compute(pos,handStr,range){
+    const push=isPushPos(pos);
+    const {def,map}=parse(get(pos,range),push);
+    const h=norm(handStr);
+    if(push){
+      const v = map[h]!=null ? map[h] : def;
+      return {disp: v==null?"—":String(Math.round(v*10)/10), num: v!=null, act:v};
+    }else{
+      const act=(map[h]||def||"—");
+      const a=alias(pos,act);
+      return {disp:a.d, num:false, act, alias:a.c};
+    }
+  }
+
+  function rowHTML(lab,val,back){
+    const fg = /^#/.test(back)?txtColor(back):"#fff";
+    return `<div class="card" data-label="${lab}"><div class="label">${lab}</div><div class="val" style="background:${back};color:${fg}">${val}</div></div>`;
+  }
+  function backColor(label,key,val,neutral){
+    if(neutral)return"#0f1520";
+    if(/Push/i.test(label)||/PUSH/i.test(key)||/^\\d+(\\.\\d+)?$/.test(val))return"#6d4b8e";
+    if(/\\(MR\\)/i.test(label)||/_MR$/i.test(key))return"#c24a4a";
+    if(/\\(Limp\\)/i.test(label)||/_L$/i.test(key)||key==="BU"||key==="HUSB")return"#7fcf7f";
+    return"#0f1520";
+  }
+
+  function render(){
+    const h=hand.value.trim(); const r=parseStack(stack.value); rngChip.textContent=r;
+    ["C1","C2","C3","C4"].forEach(id=>document.getElementById(id).innerHTML="");
+    if(!h) return;
+    for(const [cid,arr] of Object.entries(GROUPS)){
+      const frag=[];
+      arr.forEach(({l,k,n})=>{
+        const c=compute(k,h,r);
+        let back = n ? "#0f1520" : backColor(l,k,c.disp,n);
+        if(c.alias) back=c.alias;
+        const valBack = c.alias ? c.alias : (/^#/.test(back)?"rgba(0,0,0,.22)":"#2a2f3c");
+        frag.push(rowHTML(l,c.disp,valBack));
+      });
+      document.getElementById(cid).innerHTML=frag.join("");
+    }
+    // attach long-press prompts for edit
+    document.querySelectorAll(".card").forEach(card=>{
+      let t=null;
+      const start=()=>{ t=setTimeout(()=>{
+        const lab=card.dataset.label;
+        // map label -> key
+        let k;
+        for(const arr of Object.values(GROUPS)){
+          for(const it of arr){ if(it.l===lab){ k=it.k; break; } }
+        }
+        const range=rngChip.textContent;
+        const cur=get(k,range);
+        const nv=prompt(`Редакция: ${lab} × ${range}\nФормат:\nHAND = ACTION\nили default = ACTION\n(PUSH → числа)\n`, cur);
+        if(nv!=null){ set(k,range,nv); render(); }
+      },500)};
+      const stop=()=>{ if(t){clearTimeout(t); t=null;} };
+      card.addEventListener("touchstart", start, {passive:true});
+      card.addEventListener("touchend", stop, {passive:true});
+      card.addEventListener("touchmove", stop, {passive:true});
+      card.addEventListener("mousedown", start);
+      card.addEventListener("mouseup", stop);
+      card.addEventListener("mouseleave", stop);
+    });
+  }
+
+  hand.addEventListener("input", render);
+  stack.addEventListener("input", render);
+  document.addEventListener("keydown",e=>{
+    if(e.key==="Tab"){e.preventDefault(); if(document.activeElement===hand){stack.focus();stack.select();}else{hand.focus();hand.select();}}
+    if(e.key==="Enter"){render();}
+  });
+  hand.focus();
+})();
+</script>
