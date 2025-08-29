@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="bg">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Range Line Builder</title>
+<style>
+  :root{
+    --bg:#0b0f14; --panel:#0f1520; --border:#223047; --text:#e7ecf3;
+    --FOLD:#f4f6fa; --L-F-F:#a7e8a7; --L-C-F:#155d15; --L-C-AI:#bcdcf3; --L-R-AI:#0b3a94;
+    --MR-F-F:#ffe27a; --MR-C-AI:#7b4a2a; --MR-4B-AI:#e44747; --SHOVE:#6d4b8e;
+    --muted:#9fb0c8;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;background:var(--bg);color:var(--text);font:16px/1.35 -apple-system,system-ui,Segoe UI,Roboto,Arial}
+  .top{position:sticky;top:0;z-index:10;background:#101827;border-bottom:1px solid var(--border);padding:8px 10px;display:flex;justify-content:space-between;align-items:center}
+  .btn{border:1px solid var(--border);background:#0f1624;color:var(--text);border-radius:12px;padding:10px 14px;font-weight:800;cursor:pointer}
+  .wrap{max-width:980px;margin:0 auto;padding:12px}
+  .card{border:1px solid var(--border);background:var(--panel);border-radius:14px;padding:12px;margin-bottom:12px}
+  .grid{display:grid;gap:8px}
+  .handGrid{display:grid;grid-template-columns:repeat(13,1fr);gap:6px}
+  .hbtn{padding:10px 0;border-radius:10px;border:1px solid var(--border);background:#111a2b;font-weight:900;text-align:center}
+  .hbtn.sel{outline:3px solid #4da3ff}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .actRow{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .act{border:2px solid rgba(0,0,0,.15);border-radius:12px;padding:14px 8px;font-weight:1000;color:#000;text-align:center}
+  .small{font-size:12px;color:var(--muted)}
+  textarea{width:100%;min-height:200px;background:#0b1220;color:var(--text);border:1px solid var(--border);border-radius:10px;padding:10px;font:14px/1.35 ui-monospace}
+  .tag{font-size:12px;opacity:.8}
+  .inline{display:flex;gap:8px;align-items:center}
+  .pill{border:1px solid var(--border);border-radius:999px;padding:6px 10px;background:#0f1624}
+  .bar{display:flex;gap:8px}
+</style>
+</head>
+<body>
+<div class="top">
+  <div><b>Range Line Builder</b> <span class="small">→ прави “HAND = ACTION”</span></div>
+  <div class="bar">
+    <button id="btnCopy" class="btn">Copy</button>
+    <button id="btnClear" class="btn">Clear</button>
+  </div>
+</div>
+
+<div class="wrap">
+  <!-- 1) ИЗБОР НА РЪКА -->
+  <div class="card">
+    <div class="row">
+      <div class="pill">1) Избери ръка</div>
+      <div class="small">Tap за избор. Отгоре са чифтове, диагоналът над него са suited, под него offsuit.</div>
+    </div>
+    <div id="handGrid" class="handGrid"></div>
+    <div class="row" style="margin-top:8px">
+      <div>Избрано: <b id="pickedHand">—</b></div>
+      <div class="tag">(повтори tap за смяна)</div>
+    </div>
+  </div>
+
+  <!-- 2) ДЕЙСТВИЕ -->
+  <div class="card">
+    <div class="row">
+      <div class="pill">2) Избери действие (цвят = легендата ти)</div>
+    </div>
+    <div class="actRow" id="actRow"></div>
+    <div class="row" style="margin-top:8px">
+      <button id="btnAdd" class="btn" style="flex:1;font-weight:900">Add</button>
+      <button id="btnAddDefaultFold" class="btn" style="flex:1">Add: default = Fold</button>
+    </div>
+    <div class="small">„Add“ добавя ред <code>HAND = ACTION</code> към списъка долу.</div>
+  </div>
+
+  <!-- 3) РЕЗУЛТАТ -->
+  <div class="card">
+    <div class="row"><div class="pill">3) Готово за копиране към треньора</div></div>
+    <textarea id="out"></textarea>
+  </div>
+</div>
+
+<script>
+(function(){
+  // --- РЪЦЕ: 13x13 матрица ---
+  const R = ["A","K","Q","J","T","9","8","7","6","5","4","3","2"];
+  const hands=[];
+  for(let i=0;i<R.length;i++){
+    for(let j=0;j<R.length;j++){
+      if(i===j){ hands.push(R[i]+R[j]); } // чифт
+      else if(i<j){ hands.push(R[i]+R[j]+"s"); } // suited (горе-триъгълник)
+      else { hands.push(R[i]+R[j]+"o"); } // offsuit (долу-триъгълник)
+    }
+  }
+
+  // --- UI за ръце ---
+  const g=document.getElementById("handGrid");
+  let picked=null;
+  function redrawSel(){
+    document.querySelectorAll(".hbtn").forEach(b=>b.classList.toggle("sel", b.dataset.h===picked));
+    document.getElementById("pickedHand").textContent=picked||"—";
+  }
+  // Рисуване като матрица 13x13
+  for(let i=0;i<13;i++){
+    for(let j=0;j<13;j++){
+      let label;
+      if(i===j) label=R[i]+R[j];
+      else if(i<j) label=R[i]+R[j]+"s";
+      else label=R[i]+R[j]+"o";
+      const b=document.createElement("button");
+      b.className="hbtn"; b.textContent=label; b.dataset.h=label;
+      b.onclick=()=>{ picked = (picked===label? label : label); redrawSel(); };
+      g.appendChild(b);
+    }
+  }
+
+  // --- ДЕЙСТВИЯ (по твоите цветове) ---
+  const ACTIONS=[
+    ["MR-4B-AI","var(--MR-4B-AI)"],
+    ["Shove","var(--SHOVE)"],
+    ["MR-C-AI","var(--MR-C-AI)"],
+    ["MR-F-F","var(--MR-F-F)"],
+    ["L-F-F","var(--L-F-F)"],
+    ["L-C-F","var(--L-C-F)"]
+  ];
+  const actRow=document.getElementById("actRow");
+  let pickedAct=null;
+  ACTIONS.forEach(([name,color])=>{
+    const b=document.createElement("button");
+    b.className="act"; b.textContent=name; b.style.background=color;
+    b.onclick=()=>{ pickedAct=name; document.querySelectorAll(".act").forEach(x=>x.style.outline="none"); b.style.outline="3px solid #4da3ff"; };
+    actRow.appendChild(b);
+  });
+
+  // --- РЕЗУЛТАТ ---
+  const out=document.getElementById("out");
+  const addLine=(h,a)=>{ if(!h||!a){alert("Избери ръка и действие.");return;} out.value += (out.value? "\n":"") + `${h} = ${a}`; };
+  document.getElementById("btnAdd").onclick=()=>addLine(picked,pickedAct);
+  document.getElementById("btnAddDefaultFold").onclick=()=>{ out.value += (out.value? "\n":"") + "default = Fold"; };
+
+  document.getElementById("btnCopy").onclick=async()=>{
+    try{ await navigator.clipboard.writeText(out.value); alert("Списъкът е копиран."); }
+    catch(e){ out.select(); document.execCommand("copy"); alert("Копирано (fallback)."); }
+  };
+  document.getElementById("btnClear").onclick=()=>{ if(confirm("Изчистване на списъка?")) out.value=""; };
+})();
+</script>
+</body>
+</html>
