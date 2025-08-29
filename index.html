@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Range Line Builder v3 (multi-select + fixed labels)</title>
+<title>Range Line Builder v3.1</title>
 <style>
   :root{
     --bg:#0b0f14; --panel:#0f1520; --border:#223047; --text:#e7ecf3;
@@ -19,16 +19,27 @@
     --muted:#9fb0c8;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%}
   body{margin:0;background:var(--bg);color:var(--text);font:16px/1.35 -apple-system,system-ui,Segoe UI,Roboto,Arial}
   .top{position:sticky;top:0;z-index:10;background:#101827;border-bottom:1px solid var(--border);padding:8px 10px;display:flex;justify-content:space-between;align-items:center}
   .btn{border:1px solid var(--border);background:#0f1624;color:var(--text);border-radius:12px;padding:10px 14px;font-weight:800;cursor:pointer}
   .wrap{max-width:980px;margin:0 auto;padding:12px}
   .card{border:1px solid var(--border);background:var(--panel);border-radius:14px;padding:12px;margin-bottom:12px}
-  .handGrid{display:grid;grid-template-columns:repeat(13,1fr);gap:6px;user-select:none}
-  .hbtn{padding:10px 0;border-radius:10px;border:1px solid var(--border);background:#111a2b;font-weight:900;text-align:center}
+  .handGrid{
+    display:grid;grid-template-columns:repeat(13,1fr);gap:6px;
+    user-select:none; -webkit-user-select:none;
+    touch-action:none;               /* ключово: не позволява жестове/скрол */
+    overscroll-behavior:contain;     /* задържа скрол в картата */
+  }
+  .hbtn{
+    padding:10px 0; min-height:44px; /* по-голям hit target */
+    border-radius:10px;border:1px solid var(--border);
+    background:#111a2b;font-weight:900;text-align:center;
+    -webkit-user-select:none; user-select:none;
+  }
   .hbtn.sel{outline:3px solid #4da3ff;background:#13223f}
   .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-  .actRow{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .actRow{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
   .act{border:2px solid rgba(0,0,0,.15);border-radius:12px;padding:14px 8px;font-weight:1000;color:#000;text-align:center}
   .small{font-size:12px;color:var(--muted)}
   textarea{width:100%;min-height:200px;background:#0b1220;color:var(--text);border:1px solid var(--border);border-radius:10px;padding:10px;font:14px/1.35 ui-monospace}
@@ -53,7 +64,7 @@
     <div class="row" style="justify-content:space-between">
       <div class="row">
         <div class="pill">1) Маркирай ръце (тап или плъзгане)</div>
-        <div class="small">Suited и Offsuit са именувани с по-голямата карта първа (AKs, AKo).</div>
+        <div class="small">Suited/Offsuit с по-голямата карта първа (AKs, AKo). Плъзгането е без скрол.</div>
       </div>
       <div class="row">
         <button id="selPairs" class="miniBtn">Pairs</button>
@@ -87,30 +98,23 @@
 
 <script>
 (function(){
-  // Ред на ранговете (A високо)
   const R = ["A","K","Q","J","T","9","8","7","6","5","4","3","2"];
 
-  // Генерираме 13x13 матрица; именуваме така, че по-голямата карта е винаги първа
+  // Матрица: по-голямата карта първа при offsuit
   const gridEl=document.getElementById("handGrid");
   const buttons=[];
   for(let i=0;i<13;i++){
     for(let j=0;j<13;j++){
       let label;
-      if(i===j){ 
-        label = R[i]+R[j]; // чифт
-      } else if(i<j){
-        // suited (горният триъгълник): R[i] е по-голямата → вече е първа
-        label = R[i]+R[j]+"s";
-      } else {
-        // offsuit (долният): по подразбиране i>j, което би дало напр. "KAo"
-        // Искаме по-голямата първа → обръщаме реда:
-        label = R[j]+R[i]+"o"; // напр. AKo
-      }
+      if(i===j) label = R[i]+R[j];
+      else if(i<j) label = R[i]+R[j]+"s";
+      else label = R[j]+R[i]+"o"; // обръщаме за AKo
       const b=document.createElement("button");
+      b.type="button";
       b.className="hbtn"; b.textContent=label; 
       b.dataset.h=label; b.dataset.i=i; b.dataset.j=j;
-      gridEl.appendChild(b);
       buttons.push(b);
+      gridEl.appendChild(b);
     }
   }
 
@@ -118,12 +122,13 @@
   const selCountEl=document.getElementById("selCount");
   const updateCount=()=>{ selCountEl.textContent=selected.size; };
   const setSel=(btn, on)=>{
+    if(!btn) return;
     btn.classList.toggle("sel", on); 
-    if(on) selected.add(btn.dataset.h); else selected.delete(btn.dataset.h); 
+    if(on) selected.add(btn.dataset.h); else selected.delete(btn.dataset.h);
     updateCount();
   };
 
-  // Тап за toggle
+  // Тап (click) за toggle – надеждно
   buttons.forEach(b=>{
     b.addEventListener("click", e=>{
       e.preventDefault();
@@ -131,28 +136,41 @@
     }, {passive:false});
   });
 
-  // Плъзгане (drag) за бърза селекция
-  let dragging=false, targetState=true;
+  // Drag селекция с блокиран скрол
+  let dragging=false, targetState=true, pointerId=null;
+  const hitButtonAt=(x,y)=>{
+    const el=document.elementFromPoint(x,y);
+    return el && el.closest ? el.closest(".hbtn") : null;
+  };
+
   gridEl.addEventListener("pointerdown", e=>{
-    const btn=e.target.closest(".hbtn"); if(!btn) return;
-    dragging=true;
+    const btn=e.target.closest(".hbtn");
+    if(!btn) return;
+    e.preventDefault();                  // блокира скрол/жестове
+    dragging=true; pointerId=e.pointerId;
+    gridEl.setPointerCapture?.(pointerId);
     targetState = !btn.classList.contains("sel");
     setSel(btn, targetState);
-    gridEl.setPointerCapture?.(e.pointerId);
-  });
+  }, {passive:false});
+
   gridEl.addEventListener("pointermove", e=>{
     if(!dragging) return;
-    const el=document.elementFromPoint(e.clientX, e.clientY);
-    const btn=el && el.closest ? el.closest(".hbtn") : null;
+    e.preventDefault();                  // блокира скрол докато драґваш
+    const btn=hitButtonAt(e.clientX, e.clientY);
     if(btn && btn.parentElement===gridEl){
       setSel(btn, targetState);
     }
-  });
-  const stopDrag=()=>{ dragging=false; };
-  gridEl.addEventListener("pointerup", stopDrag);
-  gridEl.addEventListener("pointercancel", stopDrag);
+  }, {passive:false});
 
-  // Бързи селекции (по геометрия на матрицата)
+  const endDrag=()=>{
+    if(!dragging) return;
+    dragging=false; pointerId=null;
+  };
+  gridEl.addEventListener("pointerup", endDrag, {passive:false});
+  gridEl.addEventListener("pointercancel", endDrag, {passive:false});
+  gridEl.addEventListener("pointerleave", endDrag, {passive:false});
+
+  // Бързи селекции
   const isPair=b=>b.dataset.i===b.dataset.j;
   const isSuited=b=>Number(b.dataset.i)<Number(b.dataset.j);
   const isOff=b=>Number(b.dataset.i)>Number(b.dataset.j);
@@ -162,14 +180,14 @@
   document.getElementById("selAll").onclick=()=>{ buttons.forEach(b=>setSel(b,true)); };
   document.getElementById("selNone").onclick=()=>{ buttons.forEach(b=>setSel(b,false)); };
 
-  // Действия с цветовете (вкл. L-R-AI тъмно синьо и L-C-AI светло синьо)
+  // Действия (вкл. тъмносиньо L-R-AI и светлосиньо L-C-AI)
   const ACTIONS=[
     ["MR-4B-AI","var(--MR-4B-AI)"],
     ["Shove","var(--SHOVE)"],
     ["MR-C-AI","var(--MR-C-AI)"],
     ["MR-F-F","var(--MR-F-F)"],
-    ["L-R-AI","var(--L-R-AI)"],  // добавено тъмносиньо
-    ["L-C-AI","var(--L-C-AI)"],  // добавено светлосиньо
+    ["L-R-AI","var(--L-R-AI)"],
+    ["L-C-AI","var(--L-C-AI)"],
     ["L-F-F","var(--L-F-F)"],
     ["L-C-F","var(--L-C-F)"]
   ];
@@ -177,14 +195,18 @@
   let pickedAct=null;
   ACTIONS.forEach(([name,color])=>{
     const b=document.createElement("button");
+    b.type="button";
     b.className="act"; b.textContent=name; b.style.background=color;
-    b.onclick=()=>{ pickedAct=name; document.querySelectorAll(".act").forEach(x=>x.style.outline="none"); b.style.outline="3px solid #4da3ff"; };
+    b.addEventListener("click", ()=>{
+      pickedAct=name;
+      document.querySelectorAll(".act").forEach(x=>x.style.outline="none");
+      b.style.outline="3px solid #4da3ff";
+    }, {passive:true});
     actRow.appendChild(b);
   });
 
   // Резултат
   const out=document.getElementById("out");
-  // сортиране по матричния ред (според визуалната решетка)
   const idxMap=new Map(buttons.map((b,i)=>[b.dataset.h,i]));
   const orderHands=arr=>arr.slice().sort((a,b)=>idxMap.get(a)-idxMap.get(b));
 
@@ -194,8 +216,7 @@
     const list = orderHands([...selected]);
     const lines = list.map(h=>`${h} = ${pickedAct}`).join("\n");
     out.value += (out.value? "\n":"") + lines;
-    // изчистваме селекцията
-    buttons.forEach(b=>setSel(b,false));
+    buttons.forEach(b=>setSel(b,false)); // clear selection
   };
   document.getElementById("btnAddDefaultFold").onclick=()=>{
     out.value += (out.value? "\n":"") + "default = Fold";
@@ -207,7 +228,6 @@
     catch(e){ out.select(); document.execCommand("copy"); alert("Копирано (fallback)."); }
   };
   document.getElementById("btnClearOut").onclick=()=>{ if(confirm("Изчисти изхода?")) out.value=""; };
-
 })();
 </script>
 </body>
